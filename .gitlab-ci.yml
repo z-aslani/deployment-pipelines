@@ -1,0 +1,68 @@
+image: kroniak/ssh-client:latest
+
+stages:
+  - staging
+  - production
+  - post_production
+
+workflow:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "trigger"'
+      when: always
+    - if: '$CI_PIPELINE_SOURCE == "web"'
+      when: always
+    - when: never
+
+variables:
+  IMAGE_URL: $PEGAH_REGISTRY_URL/$IMAGE_REPOSITORY/$IMAGE_NAME:$IMAGE_TAG
+
+deploy-staging:
+  stage: staging
+  rules:
+    - if: '$COMMIT_BRANCH == "master"'
+      when: always
+    - if: '$COMMIT_BRANCH == "staging"'
+      when: always
+    - when: never
+  before_script:
+    - mkdir -p ~/.ssh
+    - echo "$SSH_PRIVATE_KEY" | tr -d '\r' > ~/.ssh/id_rsa
+    - chmod 700 ~/.ssh/id_rsa
+    - eval "$(ssh-agent -s)"
+    - ssh-add ~/.ssh/id_rsa
+  script:
+    - ssh -o "StrictHostKeyChecking=no" root@$STAGING_SSH_SERVER /home/gitlab-cicd/update-deploy.sh -n $K8S_STAGING_NAMESPACE -d $K8S_DEPLOYMENT -c $K8S_DEPLOYMENT_CONTAINER -i $IMAGE_NAME -t $IMAGE_TAG -b $COMMIT_BRANCH -r $IMAGE_REPOSITORY -p $PROJECT_PATH
+
+
+deploy-production:
+  stage: production
+  rules:
+    - if: '$COMMIT_BRANCH == "master"'
+      when: always
+    - if: '$COMMIT_BRANCH == "staging"'
+      when: always
+    - when: never
+  before_script:
+    - mkdir -p ~/.ssh
+    - echo "$SSH_PRIVATE_KEY" | tr -d '\r' > ~/.ssh/id_rsa
+    - chmod 700 ~/.ssh/id_rsa
+    - eval "$(ssh-agent -s)"
+    - ssh-add ~/.ssh/id_rsa
+  script:
+    - ssh -o "StrictHostKeyChecking=no" root@$PRODUCTION_SSH_SERVER /home/gitlab-cicd/update-deploy.sh -n $K8S_PRODUCTION_NAMESPACE -d $K8S_DEPLOYMENT -c $K8S_DEPLOYMENT_CONTAINER -i $IMAGE_NAME -t $IMAGE_TAG -b $COMMIT_BRANCH -r $IMAGE_REPOSITORY -p $PROJECT_PATH
+
+purge-cloudflare-dns-cache:
+  stage: post_production
+  rules:
+    - if: '$PURGE_CLOUDFLARE_DNS_CACHE'
+      when: always
+    - when: never
+  before_script:
+    - mkdir -p ~/.ssh
+    - echo "$SSH_PRIVATE_KEY" | tr -d '\r' > ~/.ssh/id_rsa
+    - chmod 700 ~/.ssh/id_rsa
+    - eval "$(ssh-agent -s)"
+    - ssh-add ~/.ssh/id_rsa
+    - sleep 240
+  script:
+    - ssh -o "StrictHostKeyChecking=no" root@$PRODUCTION_SSH_SERVER /home/gitlab-cicd/purge-cloudflare.sh $CLOUDFLARE_ZONE_HASH $SERVICE_URL
